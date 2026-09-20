@@ -12,16 +12,18 @@ pkgdesc="Beautiful, security-first Wayland display manager / login manager with 
 arch=('x86_64')
 url="https://github.com/satorisage/door"
 license=('MPL-2.0')
-# Runtime: PAM, logind (systemd), the greeter host compositor (cage), and the
-# font the built-in default theme renders in (MesloLGS Nerd Font) so the greeter
-# looks as designed out of the box.
-depends=('pam' 'systemd' 'cage' 'ttf-meslo-nerd')
+# Runtime: PAM, logind (systemd), the libraries the in-tree greeter host
+# (doorstep) needs to drive KMS and input, and the font the built-in default
+# theme renders in (MesloLGS Nerd Font) so the greeter looks as designed out of
+# the box. door no longer depends on `cage` — doorstep replaced it (D-0022).
+depends=('pam' 'systemd' 'libinput' 'libseat' 'mesa' 'libxkbcommon' 'ttf-meslo-nerd')
 makedepends=('cargo')
 # Optional hardware-key 2FA. door drives whatever PAM stack the system presents,
 # so a `pam_u2f.so` line the admin adds to the login stack "just works" over the
 # daemon's multi-prompt conversation — see docs/yubikey.md. pamu2fcfg (enrollment)
 # ships in the same package.
-optdepends=('pam-u2f: FIDO2/U2F hardware-key second factor (YubiKey etc.), see docs/yubikey.md')
+optdepends=('pam-u2f: FIDO2/U2F hardware-key second factor (YubiKey etc.), see docs/yubikey.md'
+            'cage: alternative greeter host, if doorstep does not come up on your hardware — set DOORD_GREETER_CMD="cage -- /usr/bin/door-greeter"')
 backup=('etc/pam.d/doord' 'etc/pam.d/door-greeter')
 install="${pkgname}.install"
 options=('!debug' '!lto')
@@ -51,10 +53,12 @@ check() {
 package() {
     cd "${pkgname}-${pkgver}"
 
-    # Binaries: the privileged daemon, the unprivileged greeter, the (also
-    # unprivileged) settings editor, and the session locker (unprivileged,
-    # ext-session-lock-v1 compositors only).
+    # Binaries: the privileged daemon, the kiosk compositor that hosts the
+    # greeter, the unprivileged greeter itself, the (also unprivileged) settings
+    # editor, and the session locker (unprivileged, ext-session-lock-v1
+    # compositors only).
     install -Dm755 target/release/doord         "$pkgdir/usr/bin/doord"
+    install -Dm755 target/release/doorstep       "$pkgdir/usr/bin/doorstep"
     install -Dm755 target/release/door-greeter   "$pkgdir/usr/bin/door-greeter"
     install -Dm755 target/release/door-settings  "$pkgdir/usr/bin/door-settings"
     install -Dm755 target/release/door-lock      "$pkgdir/usr/bin/door-lock"

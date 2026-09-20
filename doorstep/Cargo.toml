@@ -1,0 +1,55 @@
+[package]
+name = "doorstep"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "doorstep"
+path = "src/main.rs"
+
+# doorstep — door's own kiosk compositor: the Rust replacement for `cage` on the
+# pre-auth path (D-0022). It hosts exactly one client (the greeter), fullscreen,
+# undecorated, on the greeter VT. Everything a login screen does not need — a
+# window zoo, XWayland, layer-shell, screencopy, foreign-toplevel, gamma control,
+# security contexts — is deliberately not implemented, not merely disabled.
+[dependencies]
+libc = { workspace = true }
+# smithay logs through `tracing`; a subscriber is the only way to see what the DRM
+# backend is complaining about on real hardware. `fmt` only — no env-filter, no ansi.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "smallvec", "std"] }
+
+# Connector/CRTC scanning for the DRM backend. `default-features = false` drops
+# `libdisplay-info`: EDID parsing is a C library doing untrusted parsing on the
+# pre-auth path, and doorstep only needs the connector name.
+smithay-drm-extras = { version = "0.1", default-features = false, optional = true }
+
+[dependencies.smithay]
+version = "0.7"
+default-features = false
+features = [
+    # Pure-Rust Wayland server frontend (no libwayland-server FFI: `use_system_lib`
+    # is deliberately *off*, so the protocol implementation itself is all Rust).
+    "wayland_frontend",
+    "desktop",
+    "renderer_gl",
+]
+
+[features]
+# The production backend: DRM/KMS + GBM + libinput + libseat on the greeter VT.
+udev = [
+    "smithay/backend_drm",
+    "smithay/backend_gbm",
+    "smithay/backend_libinput",
+    "smithay/backend_udev",
+    "smithay/backend_session_libseat",
+    "smithay/backend_egl",
+    "dep:smithay-drm-extras",
+]
+# The nested backend: a window on an existing compositor. Development and the
+# screenshot harness only — doord never sets `WAYLAND_DISPLAY` for the greeter,
+# so this path is unreachable in production. Build with
+# `--no-default-features --features udev` to leave it out entirely.
+nested = ["smithay/backend_winit"]
+default = ["udev", "nested"]

@@ -100,3 +100,15 @@ Of the forks above: 1–2 are answered (Tier B → its own repo/scope; Tier A
 remains a door candidate), 3–4 transfer to doorstep's eventual door DECISION.
 **This file stays in the inbox for the doorstep (Tier A) half only** — the
 cage-replacement question is door's, unratified, and unaffected by foyer.
+
+## Graduation (2026-09-20, D-0022) — Tier A fork RESOLVED → doorstep, in door
+
+The cage-replacement half is built and ratified: **doorstep** is a door workspace
+crate hosting the greeter on the greeter VT, and `cage` has left `depends`. Of the
+forks above: 1 is answered (Tier A built, Tier B is foyer's, Tier C declined),
+2 is answered (in-repo workspace member), and 3–4 are settled in
+[DECISION-0022](../../DECISIONS/DECISION-0022-doorstep-kiosk-compositor.md) — its
+threat model is the enumerated protocol surface plus the single-client and uid
+gates, and M10's demo is unaffected (the *session* compositor is still not door's).
+
+With both halves resolved, this file is archived.

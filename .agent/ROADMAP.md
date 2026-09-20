@@ -35,6 +35,36 @@ milestone's task tree is the plan; `.agent/TODO.md` is its derived ready-frontie
 > M-F stays parked entirely (owner directive). M8/M9 are complete (tagged in place under
 > `## Backlog` per the in-place convention, not physically relocated).
 
+### M11 — doorstep (cage-replacement kiosk compositor) — ⏳ CODE COMPLETE, hardware demo pending (ratified D-0022, 2026-09-20)
+**Criticality: Critical** — this *enters* the pre-auth TCB, replacing the component
+that can watch the password being typed. It graduates the Tier A half of
+`IDEAS/ARCHIVED/2026-07-04-door-compositor.md`; Tier B stays foyer's (D-0021).
+Full shape, protocol surface, and the fork resolutions in **D-0022**.
+
+- [x] **T1** **The `doorstep` crate** — a Smithay single-client kiosk compositor.
+      Three enforced rules: socket admission gated on the peer's `SO_PEERCRED`
+      uid **and** pid (the hosted process, not the first connection — the real
+      greeter opens three); every toplevel configured fullscreen/undecorated from the initial
+      configure; exit status mirrors the hosted client's. `Ctrl+Alt+F<n>` is
+      intercepted so the documented TTY recovery path works from the login screen.
+- [x] **T2** **Backends** — `udev` (DRM/KMS + GBM + libinput + libseat, single GPU,
+      every connected output lit) and `nested` (a window on an existing compositor,
+      dev/screenshots only; `--no-default-features --features udev` drops it).
+- [x] **T3** **Wiring** — `doord`'s default `greeter_cmd` is
+      `doorstep -- /usr/bin/door-greeter`; PKGBUILD installs `/usr/bin/doorstep`,
+      drops `cage` from `depends`, and keeps it in `optdepends` as the fallback.
+      `DOORD_GREETER_CMD` keeps the `HOST -- CLIENT` shape either way.
+- [x] **T4** **Nested verification** — end to end under Xvfb with the **real
+      `door-greeter`**: it renders fullscreen and undecorated (sky, card, clock,
+      session picker), a foreign client is refused and gets no globals, and
+      `SIGTERM` tears down and exits with the child's status.
+- [ ] **T5** **Done-when: the on-hardware demo.** `doorstep` has never been run on
+      a real VT. Boot with `doord` enabled, confirm the greeter comes up on the
+      greeter VT, log in, and confirm the handoff still releases the seat; check
+      `Ctrl+Alt+F2` reaches a TTY from the login screen. **Until T5 passes, the
+      `cage` fallback is the documented escape hatch**, and doorstep should not be
+      called shipped.
+
 ### M10 — door-lock (session lock screen) — ⏳ IN PROGRESS (ratified D-0019, 2026-07-03) — Reauth verb + threat model shipped
 **Criticality: Critical** (new privileged IPC verb + a new lockout mode). Reuses the
 hardware-proven doord PAM engine + door-theme surface; the novel, security-critical

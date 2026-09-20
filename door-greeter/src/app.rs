@@ -45,9 +45,10 @@ fn theme() -> &'static Theme {
     THEME.get_or_init(Theme::load)
 }
 
-/// Run the greeter (D-0007): a plain `iced` fullscreen toplevel, hosted by `cage`
-/// on the greeter VT. As the sole client on its own compositor it needs nothing
-/// `wlr-layer-shell` offers (v1 has no lock screen), and `cage` — the smallest
+/// Run the greeter (D-0007): a plain `iced` fullscreen toplevel, hosted by
+/// `doorstep` on the greeter VT (D-0022 replaced `cage` with door's own kiosk
+/// compositor). As the sole client on its own compositor it needs nothing
+/// `wlr-layer-shell` offers (v1 has no lock screen), and the host — the smallest
 /// pre-auth surface — does not advertise it.
 ///
 /// Production: fullscreen. Dev (`DOORD_GREETER_DEV` set): a normal window, so the
@@ -60,11 +61,14 @@ pub fn run() -> iced::Result {
         .title("door")
         .window(window::Settings {
             fullscreen,
-            // cage advertises no server-side-decoration protocol, so winit falls
-            // back to client-side decorations even fullscreen: a ~35px titlebar
-            // subsurface placed above the origin, shrinking our content buffer to
-            // 1045 and leaving the bottom 35px of the 1080 panel uncovered — the
-            // black strip. We draw our own chrome; suppress winit's entirely.
+            // A host that advertises no server-side-decoration protocol (cage
+            // did not) makes winit fall back to client-side decorations even
+            // fullscreen: a ~35px titlebar subsurface placed above the origin,
+            // shrinking our content buffer to 1045 and leaving the bottom 35px of
+            // the 1080 panel uncovered — the black strip. doorstep answers
+            // xdg-decoration server-side and draws none, so this is now belt and
+            // braces; keep it for hosts that do not (and because we draw our own
+            // chrome regardless).
             decorations: false,
             ..Default::default()
         })
@@ -491,8 +495,9 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::SessionStarted => {
             state.phase = Phase::Started;
             state.status = "Session started.".to_string();
-            // The greeter's job is done: step aside so the host compositor (cage)
-            // exits and frees the VT for the session the daemon just launched.
+            // The greeter's job is done: step aside so the host compositor
+            // (doorstep) exits and frees the VT for the session the daemon just
+            // launched.
             task = iced::exit();
         }
         Message::DaemonError(message) => {

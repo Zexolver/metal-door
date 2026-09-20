@@ -137,7 +137,7 @@ pub fn main() -> ExitCode {
 /// Greeter-worker entry (D-0008): doord re-execs itself here to launch the
 /// greeter. It opens a **passwordless** logind session for the greeter user (so
 /// the host compositor gets seat0 DRM/input access), forks
-/// `cage -- door-greeter` as that user on the seat VT, waits for it, then closes
+/// `doorstep -- door-greeter` as that user on the seat VT, waits for it, then closes
 /// the session and exits.
 ///
 /// In the sandbox-split path the spawner hands this worker a control socket on
@@ -174,7 +174,7 @@ fn adopt_control_fd() -> Option<UnixStream> {
     // SAFETY: in the split path the spawner dup'd the control socket onto
     // CONTROL_FD before exec and we are its sole owner here.
     let control = unsafe { UnixStream::from_raw_fd(CONTROL_FD) };
-    // Close-on-exec so cage (forked+exec'd below) never gets the control channel;
+    // Close-on-exec so the greeter host (forked+exec'd below) never gets the control channel;
     // we keep it in this process until exit.
     // SAFETY: CONTROL_FD is the fd we just adopted; setting FD_CLOEXEC is safe.
     unsafe {
@@ -191,7 +191,7 @@ static GREETER_CHILD_PID: AtomicI32 = AtomicI32::new(0);
 /// compositor. doord ends the greeter at handoff by signalling *this* worker, but
 /// the compositor is a separate session leader holding seat0's VT/DRM; unless it is
 /// told to exit it lingers and the user session cannot take the seat. Forwarding
-/// lets it release cleanly (`cage` answers SIGTERM by tearing the display down);
+/// lets it release cleanly (`doorstep` answers SIGTERM by tearing the display down);
 /// the child's `PR_SET_PDEATHSIG=SIGKILL` is the backstop if this worker is itself
 /// SIGKILLed before it can forward.
 extern "C" fn forward_terminate(_sig: libc::c_int) {
@@ -233,7 +233,7 @@ fn launch_greeter(config: &Config) -> io::Result<Option<std::process::ExitStatus
         .map_err(|e| io::Error::other(format!("greeter account check: {e}")))?;
 
     // Register a *greeter-class* logind session on the seat/VT — that is what
-    // grants cage DRM/input. Class=greeter lets a later user session take over.
+    // grants the host DRM/input. Class=greeter lets a later user session take over.
     let putenv = |ctx: &mut Context<NullConversation>, kv: &str| -> io::Result<()> {
         ctx.putenv(kv)
             .map_err(|e| io::Error::other(format!("pam_putenv (greeter): {e}")))
@@ -270,7 +270,7 @@ fn launch_greeter(config: &Config) -> io::Result<Option<std::process::ExitStatus
     }
     let token = pam_session.leak();
 
-    // Fork the greeter command (cage -- door-greeter) as the greeter user, on the
+    // Fork the greeter command (doorstep -- door-greeter) as the greeter user, on the
     // seat VT, with the privilege drop + VT/tty handoff (same path as a session).
     let status = match spawn::launch(
         &config.greeter_cmd,

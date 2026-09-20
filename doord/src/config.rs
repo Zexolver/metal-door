@@ -72,7 +72,11 @@ pub struct Config {
     /// login service (`pam_service`) — this one authenticates no human.
     pub greeter_pam_service: String,
     /// The command doord execs as the greeter (`DOORD_GREETER_CMD`, whitespace-
-    /// split; default `cage -- /usr/bin/door-greeter`).
+    /// split; default `doorstep -- /usr/bin/door-greeter`).
+    ///
+    /// `doorstep` is door's own kiosk compositor (D-0022); it takes the same
+    /// `HOST -- CLIENT` shape `cage` did, so setting this to
+    /// `cage -- /usr/bin/door-greeter` is still a supported fallback.
     pub greeter_cmd: Vec<String>,
 }
 
@@ -131,7 +135,7 @@ impl Config {
             .filter(|v| !v.trim().is_empty())
             .map(|v| v.split_whitespace().map(str::to_string).collect::<Vec<_>>())
             .unwrap_or_else(|| {
-                ["cage", "--", "/usr/bin/door-greeter"]
+                ["doorstep", "--", "/usr/bin/door-greeter"]
                     .iter()
                     .map(|s| s.to_string())
                     .collect()

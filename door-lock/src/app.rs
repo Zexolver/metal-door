@@ -72,7 +72,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::var_os("DOOR_LOCK_DEV").is_some() {
         iced::application(boot, update, dev_view)
             .title("door-lock (dev)")
-            // No client-side decorations: under a decoration-less host (cage) winit's
+            // No client-side decorations: under a host that draws none, winit's
             // CSD fallback would shrink the content buffer — same fix as the greeter.
             .window(iced::window::Settings {
                 decorations: false,

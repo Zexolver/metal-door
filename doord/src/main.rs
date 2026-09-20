@@ -48,7 +48,7 @@ fn main() -> ExitCode {
     // Re-exec modes (the daemon forks itself into these): the per-login session
     // worker (D-0005) holds the PAM transaction and is the logind session leader;
     // the greeter worker (D-0008) holds a passwordless greeter session and runs
-    // cage. Neither opens the IPC listener.
+    // the greeter host. Neither opens the IPC listener.
     match std::env::args().nth(1).as_deref() {
         Some(worker::WORKER_ARG) => return worker::main(),
         Some(worker::GREETER_WORKER_ARG) => return worker::run_greeter(),

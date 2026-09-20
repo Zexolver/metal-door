@@ -11,7 +11,7 @@
 
 | ID | Date | Title |
 |---|---|---|
-| 0007 | 2026-06-26 | [Greeter host: cage + plain-iced fullscreen toplevel](DECISION-0007-greeter-host-cage-toplevel.md) |
+| 0007 | 2026-06-26 | [Greeter host: cage + plain-iced fullscreen toplevel](DECISION-0007-greeter-host-cage-toplevel.md) — *host clause superseded by 0022 (2026-09-20): doorstep replaces cage; the plain-toplevel ruling stands* |
 | 0008 | 2026-06-26 | [doord owns the greeter lifecycle (handoff + re-greet)](DECISION-0008-doord-owns-greeter-lifecycle.md) |
 | 0009 | 2026-06-27 | [Session lifetime tied to doord; seat freed by killing the compositor process group](DECISION-0009-session-lifetime-tied-to-doord.md) |
 | 0010 | 2026-06-27 | [Greeter config tooling: standalone Rust editor + shared theme crate (not a Qt/QML KCM)](DECISION-0010-greeter-config-tooling.md) |
@@ -26,3 +26,4 @@
 | 0019 | 2026-07-03 | [Session lock screen: door-lock as an ext-session-lock-v1 client + a doord Reauth verb (M10)](DECISION-0019-session-lock-door-lock.md) |
 | 0020 | 2026-07-04 | [Module naming: the door-parts convention](DECISION-0020-module-naming-door-parts.md) |
 | 0021 | 2026-07-04 | [DE work graduates to its own project: foyer (door stays the DM)](DECISION-0021-de-graduates-to-foyer.md) |
+| 0022 | 2026-09-20 | [doorstep: door's own kiosk compositor replaces cage](DECISION-0022-doorstep-kiosk-compositor.md) — *supersedes D-0007's host clause (cage); its surface-type ruling stands* |

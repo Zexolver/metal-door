@@ -58,7 +58,7 @@ const GREETER_MIN_UPTIME: Duration = Duration::from_secs(3);
 const GREETER_RESPAWN_BACKOFF: Duration = Duration::from_secs(2);
 
 /// After this many *consecutive* quick greeter failures the daemon stops trying
-/// and exits cleanly ([`give_up`]). Relaunching a compositor (cage) that grabs
+/// and exits cleanly ([`give_up`]). Relaunching a compositor (doorstep) that grabs
 /// DRM/KMS on a tight loop is what wedges the GPU and blacks out every VT, so a
 /// sustained failure must fail *safe* — leave a usable text console — not spin.
 const GREETER_MAX_RAPID_FAILURES: u32 = 3;
@@ -78,7 +78,7 @@ const SEAT_FREE_KILL_SETTLE: Duration = Duration::from_millis(500);
 
 /// How often the greeter-watch poll wakes to re-check the greeter process while
 /// waiting for it to connect. Short enough that a greeter which dies *before*
-/// connecting (cage couldn't take the seat's DRM master, say) is noticed
+/// connecting (the host couldn't take the seat's DRM master, say) is noticed
 /// promptly and routed to the backoff/give-up path instead of hanging the daemon
 /// on `accept()` forever; long enough not to busy-spin.
 const GREETER_WATCH_INTERVAL: Duration = Duration::from_millis(250);
@@ -279,7 +279,7 @@ fn wait_for_session(mut child: SessionChild, seat: &crate::config::SeatTarget, s
 /// The user's compositor runs under the per-user systemd manager and *outlives*
 /// the logind session, doord, and `loginctl terminate-session` alike — it keeps
 /// the seat's DRM master, so any next login manager (sddm, or doord's own
-/// re-greeted cage) cannot acquire the GPU and is left on a blank, blinking VT.
+/// re-greeted host) cannot acquire the GPU and is left on a blank, blinking VT.
 ///
 /// Killing the holder's bare pid is *not* enough: KWin (and friends) run the
 /// compositor under a supervisor — `kwin_wayland_wrapper` — that **respawns** the
@@ -458,7 +458,7 @@ pub fn serve(
         // Claim the seat before greeting: if a previous session's compositor is
         // still squatting the seat's DRM master (a doord crash/SIGKILL the
         // teardown path couldn't clean up, or a session that outlived its logind
-        // session), cage could never take the master — it would die pre-connect
+        // session), the host could never take the master — it would die pre-connect
         // and trip the give-up path. Free the seat first so the greeter always
         // starts on a clean GPU. A no-op when nothing holds the card.
         if manage_greeter {
@@ -494,7 +494,7 @@ pub fn serve(
         // Serve one greeter connection. Sequential by construction — one seat, one
         // greeter, no concurrency. While a greeter is managed, wait for it to
         // connect *and* watch the process: if it dies before connecting (the
-        // pre-handshake wedge — e.g. cage can't take a held DRM master), don't
+        // pre-handshake wedge — e.g. the host can't take a held DRM master), don't
         // block on accept() forever; reset the VT and fall through to the
         // rapid-failure accounting so the streak trips the give-up path.
         let greeted_at = Instant::now();
@@ -580,7 +580,7 @@ mod vt_ioctl {
     }
 }
 
-/// Restore VT `vtnr` to a switchable text console. A compositor (cage) that was
+/// Restore VT `vtnr` to a switchable text console. A compositor (doorstep) that was
 /// SIGKILLed never undoes its own VT setup: it leaves the VT in graphics mode
 /// and — the part that actually freezes `Ctrl+Alt+Fn` — in process-controlled
 /// switch mode (`VT_PROCESS`), where the kernel waits forever for a switch ack
@@ -685,7 +685,7 @@ unsafe fn reset_vt_via_fd(fd: libc::c_int, vtnr: u32) {
 }
 
 /// A managed greeter process (the re-exec'd greeter worker, which runs
-/// `cage -- door-greeter`), tracked so it can be torn down at the greeter→session
+/// `doorstep -- door-greeter`), tracked so it can be torn down at the greeter→session
 /// handoff and cleaned up before a re-greet. How it is tracked depends on who forked
 /// it: in the direct/dev path it is the supervisor's own child; in the sandbox-split
 /// path it is the spawner's child, so the supervisor watches its control-fd EOF
@@ -776,7 +776,7 @@ impl GreeterHandle {
     }
 
     /// Terminate the greeter and **wait for it to exit**, so the seat's VT/DRM is
-    /// released before the session takes it. `SIGTERM` first (cage releases the
+    /// released before the session takes it. `SIGTERM` first (the host releases the
     /// seat and exits cleanly), escalating to `SIGKILL` if it lingers. Idempotent:
     /// a second call (or one after the greeter already exited) just returns.
     fn terminate(&mut self) {
@@ -819,7 +819,7 @@ impl GreeterHandle {
                 }
                 let pid = *pid;
                 // SAFETY: pid is the spawner-forked greeter worker's; SIGTERM asks it
-                // to exit (it forwards to cage, which releases the seat, then closes
+                // to exit (it forwards to doorstep, which releases the seat, then closes
                 // its logind session). We observe completion as EOF on `control`.
                 unsafe { libc::kill(pid, libc::SIGTERM) };
                 if wait_for_control_eof(control, GREETER_TERM_GRACE) {
@@ -879,7 +879,7 @@ enum AcceptOutcome {
 /// Accept the greeter connection, but — when doord manages the greeter — do not
 /// block on `accept()` indefinitely: concurrently watch the greeter process so a
 /// pre-handshake death (it never connects) is detected and reported rather than
-/// hanging the daemon forever (RC: cage failing to take a held DRM master would
+/// hanging the daemon forever (RC: the host failing to take a held DRM master would
 /// otherwise wedge doord silently). Without a managed greeter (dev) there is no
 /// process to watch, so it just blocks on `accept()`.
 fn accept_with_greeter_watch(

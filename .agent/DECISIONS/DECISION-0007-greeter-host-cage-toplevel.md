@@ -1,9 +1,14 @@
 # DECISION-0007 — Greeter host: cage + plain-iced fullscreen toplevel
 
-**Status:** Binding
+**Status:** Binding — *host clause superseded*
 **Date:** 2026-06-26
 **Ratified:** 2026-06-26
 **Project:** door
+**Superseded in part by:** D-0022 (2026-09-20). The **host** is now `doorstep`,
+door's own Smithay kiosk compositor, not `cage`; `cage` remains a supported
+fallback via `DOORD_GREETER_CMD`. Everything else below — the surface-type ruling
+(a plain `iced` fullscreen `xdg-toplevel`, not layer-shell), the metric that
+picked it, and the `DOORD_GREETER_DEV` behaviour — still stands.
 **Supersedes:** the *surface-type* clause of D-0006 (`iced_layershell` /
 `wlr-layer-shell`). D-0006's toolkit choice (**Iced**) still stands.
 

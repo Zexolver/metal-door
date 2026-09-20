@@ -20,6 +20,15 @@ door is **privilege-separated**, deliberately, in the SDDM/greetd lineage:
   session discovery + spawn, env sanitization, and a peer-cred-checked local IPC
   server. This is the trusted computing base; it stays minimal and is the only thing
   that touches credentials or root.
+- **`doorstep`** — the *unprivileged* kiosk compositor that hosts the greeter on
+  the greeter VT. It is a single-client, single-fullscreen-surface Wayland server
+  built on [Smithay](https://github.com/Smithay/smithay): the socket admits only
+  the process it launched (uid- and pid-checked against `SO_PEERCRED`), every
+  toplevel is configured fullscreen and undecorated,
+  and the protocol surface stops at what a login screen needs — no XWayland, no
+  layer-shell, no screencopy, no foreign-toplevel, no security contexts. It
+  replaces [`cage`](https://github.com/cage-kiosk/cage) so that nothing on the
+  pre-auth path is C that door does not own.
 - **`door-greeter`** — an *unprivileged* Wayland UI. It renders the beautiful part
   (GPU-shaded animated sky, themed login card) and holds no authority beyond "ask
   `doord` to try these credentials." A compromised greeter is not root.
@@ -37,9 +46,13 @@ door is **privilege-separated**, deliberately, in the SDDM/greetd lineage:
   If the locker ever wedges, the compositor keeps the screen blanked — recover
   from a TTY (`Ctrl+Alt+F3`, log in, `pkill door-lock` and relaunch it).
 
-The login flow: `doord` launches the greeter under [`cage`](https://github.com/cage-kiosk/cage)
-→ greeter authenticates via `doord` → on success `doord` registers the logind
-session, hands off the seat/VT, and starts the chosen session.
+The login flow: `doord` launches the greeter under `doorstep` → greeter
+authenticates via `doord` → on success `doord` registers the logind session, hands
+off the seat/VT, and starts the chosen session.
+
+The host is configurable (`DOORD_GREETER_CMD`), and `cage` takes the same
+`HOST -- CLIENT` shape, so `DOORD_GREETER_CMD="cage -- /usr/bin/door-greeter"`
+remains a supported fallback if doorstep does not come up on your hardware.
 
 ## Compatibility
 
@@ -48,7 +61,7 @@ session, hands off the seat/VT, and starts the chosen session.
 | **Wayland sessions** (Plasma, GNOME, sway, Hyprland, …) | ✅ supported — only Plasma is hardware-proven so far |
 | **X11 sessions** (i3, XFCE, …) | ⛔ not yet — door starts no X server, so X11 entries are hidden by default (`DOORD_ALLOW_X11=1` lists them at your own risk) |
 | **Distro** | Arch / CachyOS (needs **systemd/logind**); packaged for Arch only |
-| **Greeter host** | requires `cage` (Wayland) |
+| **Greeter host** | `doorstep`, in-tree — needs KMS/DRM, libinput and libseat (`cage` still works as a fallback) |
 
 ## Install
 

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["protocol", "doord", "door-theme", "door-greeter", "door-lock", "door-settings"]
+members = ["protocol", "doord", "doorstep", "door-theme", "door-greeter", "door-lock", "door-settings"]
 
 [workspace.package]
 version = "0.1.8"

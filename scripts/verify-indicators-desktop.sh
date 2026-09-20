@@ -10,6 +10,15 @@
 # reads). Requires unprivileged user namespaces (the default on most Arch/CachyOS
 # kernels) and `cage` + `grim`.
 #
+# NOTE (D-0022): door's own greeter host is now `doorstep`, not `cage`. This harness
+# deliberately still uses `cage` — it needs a *headless* host so it can run over SSH
+# with no seat, and doorstep only offers a DRM backend (a VT) and a nested backend
+# (an existing compositor). Neither is what a headless screenshot run wants, so the
+# dependency here is dev-only and intentionally independent of what door ships. To
+# check the same thing under the real host, run it from a graphical session with
+# `doorstep --backend nested -- ./target/debug/door-greeter` in place of the `cage`
+# line below.
+#
 # Expected result in the PNG: no "⚡ …%" row (battery hidden), a "⌨ US" row under the
 # password (kb-layout shown). Compare a real laptop run (battery present) to see the
 # "⚡ …%" row appear from the same config.
