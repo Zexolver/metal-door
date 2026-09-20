@@ -3,7 +3,7 @@
 # door-greeter.service's PAMName. The greeter is a passwordless system user: it is
 # permitted without authentication, but a session IS opened so pam_systemd
 # registers a logind session for it — that registration is what grants the host
-# compositor (cage) seat0 DRM/input access on its VT. Mirrors greetd's greeter
+# compositor (doorstep) seat0 DRM/input access on its VT. Mirrors greetd's greeter
 # PAM service. This service authenticates no human and must never be used for one.
 auth      required  pam_permit.so
 account   required  pam_permit.so
