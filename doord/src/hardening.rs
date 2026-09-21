@@ -209,13 +209,24 @@ fn target_arch() -> io::Result<TargetArch> {
 /// state: the epoll/accept IPC loop, `SCM_RIGHTS` fd passing to the spawner, PAM-relay
 /// proxying, seat/VT/DRM ioctls, the SIGCHLD reaper, and process teardown. The
 /// spawner, worker, and session are *not* covered — they run outside this lineage.
+/// Entries marked `#[cfg(target_arch = "x86_64")]` are **legacy syscalls that do
+/// not exist on aarch64** — that architecture provides only the `*at`/`p-` forms,
+/// which are already listed beside them, so gating them costs aarch64 nothing.
+///
+/// ⚠ The aarch64 allowlist is **not hardware-validated**. D-0016 derived the
+/// x86_64 set empirically under `SCMP_ACT_LOG` across a full login cycle on real
+/// hardware before enforcing it; no such run has happened on aarch64. Run with
+/// `DOORD_SECCOMP=log` there first and widen this list from the audit log before
+/// trusting `enforce`.
 const SUPERVISOR_ALLOWLIST: &[i64] = &[
     // --- event loop / socket I/O ---
     libc::SYS_epoll_create1,
     libc::SYS_epoll_ctl,
+    #[cfg(target_arch = "x86_64")]
     libc::SYS_epoll_wait,
     libc::SYS_epoll_pwait,
     libc::SYS_ppoll,
+    #[cfg(target_arch = "x86_64")]
     libc::SYS_poll,
     libc::SYS_accept,
     libc::SYS_accept4,
@@ -240,36 +251,47 @@ const SUPERVISOR_ALLOWLIST: &[i64] = &[
     libc::SYS_writev,
     libc::SYS_pread64,
     libc::SYS_pwrite64,
+    #[cfg(target_arch = "x86_64")]
     libc::SYS_open,
     libc::SYS_openat,
     libc::SYS_close,
     libc::SYS_lseek,
     libc::SYS_fcntl,
     libc::SYS_dup,
+    #[cfg(target_arch = "x86_64")]
     libc::SYS_dup2,
     libc::SYS_dup3,
     libc::SYS_pipe2,
     libc::SYS_eventfd2,
     libc::SYS_fstat,
     libc::SYS_newfstatat,
+    #[cfg(target_arch = "x86_64")]
     libc::SYS_stat,
+    #[cfg(target_arch = "x86_64")]
     libc::SYS_lstat,
     libc::SYS_statx,
     libc::SYS_getdents64,
+    #[cfg(target_arch = "x86_64")]
     libc::SYS_readlink,
     libc::SYS_readlinkat,
+    #[cfg(target_arch = "x86_64")]
     libc::SYS_access,
     libc::SYS_faccessat,
     libc::SYS_faccessat2,
     // --- socket-dir bookkeeping (create/chmod/chown/unlink the listener) ---
+    #[cfg(target_arch = "x86_64")]
     libc::SYS_mkdir,
     libc::SYS_mkdirat,
+    #[cfg(target_arch = "x86_64")]
     libc::SYS_unlink,
     libc::SYS_unlinkat,
+    #[cfg(target_arch = "x86_64")]
     libc::SYS_rename,
     libc::SYS_renameat2,
+    #[cfg(target_arch = "x86_64")]
     libc::SYS_chmod,
     libc::SYS_fchmod,
+    #[cfg(target_arch = "x86_64")]
     libc::SYS_chown,
     libc::SYS_fchown,
     libc::SYS_fchownat,
@@ -300,6 +322,7 @@ const SUPERVISOR_ALLOWLIST: &[i64] = &[
     libc::SYS_geteuid,
     libc::SYS_getgid,
     libc::SYS_getegid,
+    #[cfg(target_arch = "x86_64")]
     libc::SYS_getpgrp,
     libc::SYS_getrandom,
     libc::SYS_prctl,

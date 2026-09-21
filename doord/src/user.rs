@@ -35,7 +35,7 @@ pub fn resolve(username: &str) -> io::Result<TargetUser> {
     loop {
         let mut passwd: libc::passwd = unsafe { std::mem::zeroed() };
         let mut result: *mut libc::passwd = std::ptr::null_mut();
-        let mut buf = vec![0i8; buf_len];
+        let mut buf = vec![0 as libc::c_char; buf_len];
 
         // SAFETY: all pointers reference live, correctly-sized storage held by
         // this stack frame for the duration of the call; `c_name` is a valid C
@@ -103,7 +103,7 @@ pub fn resolve_uid(uid: u32) -> io::Result<TargetUser> {
     loop {
         let mut passwd: libc::passwd = unsafe { std::mem::zeroed() };
         let mut result: *mut libc::passwd = std::ptr::null_mut();
-        let mut buf = vec![0i8; buf_len];
+        let mut buf = vec![0 as libc::c_char; buf_len];
 
         // SAFETY: all pointers reference live, correctly-sized storage held by this
         // stack frame for the duration of the call. getpwuid_r writes the entry into
