@@ -115,16 +115,20 @@ else
     DESC_HOST="Greeter host: cage."
 fi
 
-cat > "$STAGE/DEBIAN/control" <<EOF
-Package: $NAME
-Version: $VERSION
-Section: admin
-Priority: optional
-Architecture: $ARCH
-Maintainer: door packaging <noreply@example.invalid>
-Depends: $DEPENDS
-Recommends: fonts-meslo-lg | fonts-firacode
-${SUGGESTS:+Suggests: $SUGGESTS}
+# A blank line ends a control stanza, so an omitted optional field must leave
+# no line behind at all — hence building the stanza line by line.
+{
+    echo "Package: $NAME"
+    echo "Version: $VERSION"
+    echo "Section: admin"
+    echo "Priority: optional"
+    echo "Architecture: $ARCH"
+    echo "Maintainer: door packaging <noreply@example.invalid>"
+    echo "Depends: $DEPENDS"
+    echo "Recommends: fonts-meslo-lg | fonts-firacode"
+    # An `&&` list whose test fails would trip `set -e`, so spell it out.
+    if [ -n "$SUGGESTS" ]; then echo "Suggests: $SUGGESTS"; fi
+    cat <<EOF
 Description: Security-first Wayland login manager with an animated GPU greeter
  door is a privilege-separated Wayland display manager: a small privileged
  daemon (doord) owning PAM, logind seat/VT management and session spawn, paired
@@ -136,6 +140,7 @@ Description: Security-first Wayland login manager with an animated GPU greeter
  the active display manager; enabling it is a separate, reversible step
  (systemctl enable --now doord).
 EOF
+} > "$STAGE/DEBIAN/control"
 
 # The PAM files are configuration: never clobber local edits on upgrade.
 cat > "$STAGE/DEBIAN/conffiles" <<'EOF'
