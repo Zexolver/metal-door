@@ -144,8 +144,57 @@ impl UdevData {
 
 /// Take the seat and find the GPU. No devices are opened yet — that needs the
 /// display handle, so it happens in [`start`].
+/// Explain, before libseat does it in errno, why this process cannot drive a VT.
+///
+/// Both of the ways to get this wrong produce errors that name neither the cause
+/// nor the fix: no runtime dir surfaces as a socket bind failure, and no seat
+/// surfaces as `EOPNOTSUPP` out of libseat. doorstep is a thing people run by
+/// hand on a TTY while testing, so it should say what is actually wrong.
+fn check_session_environment() -> Result<(), String> {
+    let mut problems = Vec::new();
+
+    if std::env::var_os("XDG_RUNTIME_DIR").is_none() {
+        problems.push(
+            "XDG_RUNTIME_DIR is not set, so there is nowhere to put the Wayland socket \
+             (running under `sudo`/`su` clears it)",
+        );
+    }
+
+    // A remote session gets a runtime dir but never a seat, so this is the check
+    // that catches "ran it over SSH".
+    let has_seat = std::env::var("XDG_SEAT")
+        .map(|s| !s.is_empty())
+        .unwrap_or(false);
+    if !has_seat {
+        problems.push(
+            "XDG_SEAT is not set, so this session owns no seat and cannot take the \
+             display (an SSH session never can; `sudo` drops it too)",
+        );
+    }
+
+    if problems.is_empty() {
+        return Ok(());
+    }
+
+    Err(format!(
+        "doorstep needs to run as your own user, in the logind session on the VT it \
+         should draw on — not under sudo and not over SSH.\n  - {}",
+        problems.join("\n  - ")
+    ))
+}
+
 pub fn init() -> Result<UdevData, Box<dyn std::error::Error>> {
-    let (session, notifier) = LibSeatSession::new()?;
+    if let Err(problem) = check_session_environment() {
+        return Err(problem.into());
+    }
+
+    let (session, notifier) = LibSeatSession::new().map_err(|err| {
+        format!(
+            "could not take a seat via libseat ({err}). The session is not one logind \
+             will hand the display to: check `loginctl show-session $XDG_SESSION_ID \
+             -p Seat -p Active -p Remote`."
+        )
+    })?;
     let seat = session.seat();
     let gpu = primary_gpu(&seat)?
         .and_then(|path| DrmNode::from_path(path).ok())
@@ -155,7 +204,9 @@ pub fn init() -> Result<UdevData, Box<dyn std::error::Error>> {
                 .into_iter()
                 .find_map(|path| DrmNode::from_path(path).ok())
         })
-        .ok_or("no GPU found on this seat")?;
+        .ok_or_else(|| {
+            format!("no GPU on seat `{seat}` — nothing in /dev/dri that logind will lease out")
+        })?;
     tracing::info!("primary GPU: {gpu}");
 
     let mut libinput =
