@@ -64,6 +64,9 @@ BIN="$SOURCE/target/$RUST_TARGET/release"
 # ── Stage ────────────────────────────────────────────────────────────────────
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
+# mktemp gives 0700; that mode is recorded for "./" in the archive and would be
+# proposed for the filesystem root on unpack.
+chmod 755 "$STAGE"
 
 install -d "$STAGE/usr/bin"
 for b in doord door-greeter door-settings door-lock; do
