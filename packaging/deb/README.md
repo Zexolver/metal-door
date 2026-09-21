@@ -9,7 +9,26 @@ side under distinct package names.
 and assembles the tree with `dpkg-deb`. One file, no `debian/` boilerplate, and
 the whole install layout is readable in one place.
 
-## Build
+## CI builds them for you
+
+`.github/workflows/release-deb.yml` is the normal path: push a `v*` tag and it
+builds `metal-door` for amd64 and arm64, verifies each package, and attaches
+both plus a `SHA256SUMS` to that tag's release (creating the release if it does
+not exist). It can also be run by hand from the Actions tab against any tag,
+with an `include_upstream` option that additionally builds upstream `door` from
+`master` for side-by-side comparison.
+
+**Both architectures build natively.** GitHub provides arm64 runners for public
+repositories, so CI needs none of the cross-compilation setup below — that is
+only for building an arm64 package on a local amd64 machine.
+
+`verify-deb.sh` runs on every package before it is published and checks the
+things that actually went wrong while this packaging was written: a split
+control stanza, mode 0700 on the package root, binaries built for the wrong
+architecture, the wrong variant shape (doorstep vs `Depends: cage`), a shipped
+enablement symlink, and unregistered conffiles.
+
+## Build it locally
 
 ```sh
 packaging/deb/build-deb.sh --source . --name metal-door --arch amd64 --outdir dist-deb

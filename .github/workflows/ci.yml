@@ -14,12 +14,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # door links libpam (doord) and Wayland (greeter); clang-sys needs libclang.
+      # doord links libpam and doorstep links the KMS/input stack it drives
+      # (D-0022); clang-sys needs libclang for pam-sys's bindgen step.
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libpam0g-dev libwayland-dev pkg-config clang libclang-dev
+            pkg-config clang libclang-dev \
+            libpam0g-dev libwayland-dev \
+            libinput-dev libseat-dev libgbm-dev libdrm-dev libudev-dev \
+            libxkbcommon-dev
 
       - uses: dtolnay/rust-toolchain@stable
         with:

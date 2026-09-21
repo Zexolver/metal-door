@@ -1,0 +1,181 @@
+# Build the .deb packages and publish them on a release.
+#
+# Pushing a v* tag builds metal-door for amd64 and arm64 and attaches both to
+# that tag's release, creating the release if it does not exist yet. The same
+# thing can be run by hand from the Actions tab against any tag.
+#
+# Both architectures build NATIVELY — GitHub provides arm64 runners for public
+# repositories, so CI needs none of the cross-compilation setup that
+# packaging/deb/README.md describes for building arm64 on a local amd64 box.
+name: Release .deb
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish to (created from the current commit if new)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark the release as a pre-release'
+        type: boolean
+        default: true
+      include_upstream:
+        description: >-
+          Also build upstream door from master, for side-by-side comparison.
+          Needs packaging/deb/upstream-arm64-portability.patch to still apply.
+        type: boolean
+        default: false
+
+# Only the release job writes; the build jobs stay read-only.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: metal-door (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          # doord links libpam; doorstep links the KMS/input stack; clang-sys
+          # needs libclang for pam-sys's bindgen step.
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config clang libclang-dev \
+            libpam0g-dev libinput-dev libseat-dev libgbm-dev libdrm-dev \
+            libudev-dev libxkbcommon-dev libwayland-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: deb-${{ matrix.arch }}
+
+      - name: Build package
+        run: |
+          packaging/deb/build-deb.sh \
+            --source . --name metal-door \
+            --arch ${{ matrix.arch }} --outdir dist-deb
+
+      - name: Verify package
+        run: packaging/deb/verify-deb.sh dist-deb/metal-door_*_${{ matrix.arch }}.deb
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-metal-door-${{ matrix.arch }}
+          path: dist-deb/*.deb
+          if-no-files-found: error
+
+  build-upstream:
+    name: door upstream (${{ matrix.arch }})
+    if: inputs.include_upstream
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      # Two checkouts: master for the sources to build, and this ref for the
+      # packaging script and the patch, neither of which exists on master.
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          path: upstream
+      - uses: actions/checkout@v4
+        with:
+          path: fork
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config clang libclang-dev libpam0g-dev libwayland-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: upstream
+          key: deb-upstream-${{ matrix.arch }}
+
+      - name: Apply the arm64 portability patch
+        # Upstream master does not build for aarch64: c_char signedness in
+        # doord/src/user.rs, and a seccomp allowlist naming x86_64-only
+        # syscalls. Harmless on amd64, required on arm64 — applied on both so
+        # the two packages differ only by architecture.
+        working-directory: upstream
+        run: git apply --verbose ../fork/packaging/deb/upstream-arm64-portability.patch
+
+      - name: Build package
+        run: |
+          fork/packaging/deb/build-deb.sh \
+            --source upstream --name door \
+            --arch ${{ matrix.arch }} --outdir dist-deb
+
+      - name: Verify package
+        run: fork/packaging/deb/verify-deb.sh dist-deb/door_*_${{ matrix.arch }}.deb
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-door-${{ matrix.arch }}
+          path: dist-deb/*.deb
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: [build]
+    # `always()` so a skipped build-upstream does not skip the release, while a
+    # failed one still does.
+    if: always() && needs.build.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist-deb
+          pattern: deb-*
+          merge-multiple: true
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+          PRERELEASE: ${{ inputs.prerelease && '--prerelease' || '' }}
+        run: |
+          set -euo pipefail
+          ls -l dist-deb
+          sha256sum dist-deb/*.deb | tee dist-deb/SHA256SUMS
+
+          # Reuse the release if it already exists (a tag push where one was
+          # drafted by hand), otherwise create it from this commit.
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+              gh release create "$TAG" \
+                  --target "$GITHUB_SHA" \
+                  --title "$TAG" \
+                  --notes "Debian packages built by \`${GITHUB_WORKFLOW}\` from \`${GITHUB_SHA}\`. See packaging/deb/README.md for what they install and the known gaps." \
+                  ${PRERELEASE}
+          fi
+          gh release upload "$TAG" dist-deb/*.deb dist-deb/SHA256SUMS --clobber

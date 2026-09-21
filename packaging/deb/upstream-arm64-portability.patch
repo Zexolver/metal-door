@@ -1,0 +1,94 @@
+diff --git a/doord/src/hardening.rs b/doord/src/hardening.rs
+index fc20302..a774d93 100644
+--- a/doord/src/hardening.rs
++++ b/doord/src/hardening.rs
+@@ -213,9 +213,11 @@ const SUPERVISOR_ALLOWLIST: &[i64] = &[
+     // --- event loop / socket I/O ---
+     libc::SYS_epoll_create1,
+     libc::SYS_epoll_ctl,
++    #[cfg(target_arch = "x86_64")]
+     libc::SYS_epoll_wait,
+     libc::SYS_epoll_pwait,
+     libc::SYS_ppoll,
++    #[cfg(target_arch = "x86_64")]
+     libc::SYS_poll,
+     libc::SYS_accept,
+     libc::SYS_accept4,
+@@ -240,36 +242,47 @@ const SUPERVISOR_ALLOWLIST: &[i64] = &[
+     libc::SYS_writev,
+     libc::SYS_pread64,
+     libc::SYS_pwrite64,
++    #[cfg(target_arch = "x86_64")]
+     libc::SYS_open,
+     libc::SYS_openat,
+     libc::SYS_close,
+     libc::SYS_lseek,
+     libc::SYS_fcntl,
+     libc::SYS_dup,
++    #[cfg(target_arch = "x86_64")]
+     libc::SYS_dup2,
+     libc::SYS_dup3,
+     libc::SYS_pipe2,
+     libc::SYS_eventfd2,
+     libc::SYS_fstat,
+     libc::SYS_newfstatat,
++    #[cfg(target_arch = "x86_64")]
+     libc::SYS_stat,
++    #[cfg(target_arch = "x86_64")]
+     libc::SYS_lstat,
+     libc::SYS_statx,
+     libc::SYS_getdents64,
++    #[cfg(target_arch = "x86_64")]
+     libc::SYS_readlink,
+     libc::SYS_readlinkat,
++    #[cfg(target_arch = "x86_64")]
+     libc::SYS_access,
+     libc::SYS_faccessat,
+     libc::SYS_faccessat2,
+     // --- socket-dir bookkeeping (create/chmod/chown/unlink the listener) ---
++    #[cfg(target_arch = "x86_64")]
+     libc::SYS_mkdir,
+     libc::SYS_mkdirat,
++    #[cfg(target_arch = "x86_64")]
+     libc::SYS_unlink,
+     libc::SYS_unlinkat,
++    #[cfg(target_arch = "x86_64")]
+     libc::SYS_rename,
+     libc::SYS_renameat2,
++    #[cfg(target_arch = "x86_64")]
+     libc::SYS_chmod,
+     libc::SYS_fchmod,
++    #[cfg(target_arch = "x86_64")]
+     libc::SYS_chown,
+     libc::SYS_fchown,
+     libc::SYS_fchownat,
+@@ -300,6 +313,7 @@ const SUPERVISOR_ALLOWLIST: &[i64] = &[
+     libc::SYS_geteuid,
+     libc::SYS_getgid,
+     libc::SYS_getegid,
++    #[cfg(target_arch = "x86_64")]
+     libc::SYS_getpgrp,
+     libc::SYS_getrandom,
+     libc::SYS_prctl,
+diff --git a/doord/src/user.rs b/doord/src/user.rs
+index 9e7b3db..b7a2e99 100644
+--- a/doord/src/user.rs
++++ b/doord/src/user.rs
+@@ -35,7 +35,7 @@ pub fn resolve(username: &str) -> io::Result<TargetUser> {
+     loop {
+         let mut passwd: libc::passwd = unsafe { std::mem::zeroed() };
+         let mut result: *mut libc::passwd = std::ptr::null_mut();
+-        let mut buf = vec![0i8; buf_len];
++        let mut buf = vec![0 as libc::c_char; buf_len];
+ 
+         // SAFETY: all pointers reference live, correctly-sized storage held by
+         // this stack frame for the duration of the call; `c_name` is a valid C
+@@ -103,7 +103,7 @@ pub fn resolve_uid(uid: u32) -> io::Result<TargetUser> {
+     loop {
+         let mut passwd: libc::passwd = unsafe { std::mem::zeroed() };
+         let mut result: *mut libc::passwd = std::ptr::null_mut();
+-        let mut buf = vec![0i8; buf_len];
++        let mut buf = vec![0 as libc::c_char; buf_len];
+ 
+         // SAFETY: all pointers reference live, correctly-sized storage held by this
+         // stack frame for the duration of the call. getpwuid_r writes the entry into

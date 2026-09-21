@@ -45,9 +45,18 @@ echo "==> building $NAME $VERSION ($ARCH, doorstep=$HAS_DOORSTEP) from $SOURCE"
 
 # ── Build ────────────────────────────────────────────────────────────────────
 cd "$SOURCE"
-if [[ "$ARCH" == "arm64" ]]; then
+# Native whenever the host already is the target — CI runs on both amd64 and
+# arm64 runners, so the cross path below is only for building arm64 locally.
+HOST_ARCH="$(dpkg --print-architecture)"
+if [[ "$ARCH" == "$HOST_ARCH" ]]; then
+    echo "==> native build on $HOST_ARCH"
+else
+    echo "==> cross-building $ARCH on $HOST_ARCH"
+    [[ "$ARCH" == "arm64" ]] || {
+        echo "cross-building $ARCH from $HOST_ARCH is not set up" >&2; exit 1; }
     SYSROOT="${SYSROOT_ARM64:-/opt/sysroot-arm64}"
-    [[ -d "$SYSROOT" ]] || { echo "missing arm64 sysroot at $SYSROOT" >&2; exit 1; }
+    [[ -d "$SYSROOT" ]] || {
+        echo "missing arm64 sysroot at $SYSROOT (see packaging/deb/README.md)" >&2; exit 1; }
     export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
     export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
     export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C link-arg=--sysroot=$SYSROOT -L $SYSROOT/usr/lib/aarch64-linux-gnu -L $SYSROOT/lib/aarch64-linux-gnu"
