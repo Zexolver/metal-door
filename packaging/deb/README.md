@@ -38,6 +38,13 @@ cd /tmp && apt-get download libpam0g-dev:arm64 libinput-dev:arm64 libseat-dev:ar
     libgbm-dev:arm64 libdrm-dev:arm64 libudev-dev:arm64 libxkbcommon-dev:arm64 \
     # ...plus their library closure
 for d in *.deb; do dpkg-deb -x "$d" /opt/sysroot-arm64; done
+
+# Reproduce usrmerge. Ubuntu ships libm.so etc. as ld scripts naming the
+# absolute path /lib/<triplet>/libm.so.6, and --sysroot makes the linker resolve
+# that *inside* the sysroot — where extraction left a real ./lib holding only the
+# few packages that install there. Without this the link fails with
+# "cannot find /lib/aarch64-linux-gnu/libm.so.6 inside /opt/sysroot-arm64".
+cd /opt/sysroot-arm64 && cp -an lib/. usr/lib/ && rm -rf lib && ln -s usr/lib lib
 ```
 
 Then build as usual — the script picks the sysroot up from `$SYSROOT_ARM64`
