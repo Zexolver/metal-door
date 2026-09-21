@@ -5301,12 +5301,7 @@ fn preview_card(t: &Theme, anim: f32) -> Element<'static, Message> {
     // Battery indicator — a representative mock (like the "12:34" clock) so the
     // placement reads; the real greeter shows the live charge.
     if t.show_battery {
-        header_items.push(
-            text("⚡ 85%")
-                .size(12.0 * t.font_scale)
-                .color(muted)
-                .into(),
-        );
+        header_items.push(text("⚡ 85%").size(12.0 * t.font_scale).color(muted).into());
     }
     let header: Element<Message> = if header_items.is_empty() {
         Space::new().into()
@@ -5396,12 +5391,7 @@ fn preview_card(t: &Theme, anim: f32) -> Element<'static, Message> {
     // Keyboard-layout indicator — a representative mock (US) under the password, so
     // the placement reads; the real greeter shows the seat's configured layout.
     if t.show_kb_layout {
-        body_items.push(
-            text("⌨  US")
-                .size(12.0 * t.font_scale)
-                .color(muted)
-                .into(),
-        );
+        body_items.push(text("⌨  US").size(12.0 * t.font_scale).color(muted).into());
     }
     body_items.push(sign_in.into());
     let body = Column::with_children(body_items)

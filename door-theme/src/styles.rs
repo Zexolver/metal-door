@@ -51,7 +51,10 @@ pub fn field_style(
 }
 
 /// The accent action button (sign in / unlock), brighter on hover, with dark text.
-pub fn button_style(t: &Theme, fade: f32) -> impl Fn(&iced::Theme, button::Status) -> button::Style {
+pub fn button_style(
+    t: &Theme,
+    fade: f32,
+) -> impl Fn(&iced::Theme, button::Status) -> button::Style {
     let accent = t.accent;
     let radius = t.field_radius;
     let on_accent = Color {

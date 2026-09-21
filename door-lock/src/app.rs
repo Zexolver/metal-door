@@ -90,11 +90,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     // expose the protocol to third-party clients) gets a clear refusal here —
     // never a half-locked screen, and not a panic out of the lock shell.
     if !compositor_supports_session_lock() {
-        return Err("this compositor does not offer ext-session-lock-v1, so door-lock \
+        return Err(
+            "this compositor does not offer ext-session-lock-v1, so door-lock \
                     cannot lock it. Supported: sway, Hyprland, river, niri, labwc, \
                     Wayfire, COSMIC, Weston 12+, ... KWin and GNOME ship their own \
                     lockers and do not accept third-party ones."
-            .into());
+                .into(),
+        );
     }
 
     iced_sessionlock::application(boot, update, view)
@@ -134,9 +136,10 @@ fn compositor_supports_session_lock() -> bool {
     let Ok((globals, _queue)) = registry_queue_init::<Probe>(&conn) else {
         return true;
     };
-    globals
-        .contents()
-        .with_list(|list| list.iter().any(|g| g.interface == "ext_session_lock_manager_v1"))
+    globals.contents().with_list(|list| {
+        list.iter()
+            .any(|g| g.interface == "ext_session_lock_manager_v1")
+    })
 }
 
 /// Window-level appearance from the theme: the solid background (also shown at any
@@ -453,8 +456,8 @@ impl State {
         match &self.cmd_tx {
             Some(tx) => {
                 if tx.send(command).is_err() {
-                    self.status = "The unlock worker is gone — switch to a TTY to recover."
-                        .to_string();
+                    self.status =
+                        "The unlock worker is gone — switch to a TTY to recover.".to_string();
                     self.status_error = true;
                     self.phase = Phase::Locked;
                 }
@@ -995,9 +998,7 @@ fn run_conversation(
                     _ => return,
                 }
             }
-            Ok(ReauthStep::Info(text)) | Ok(ReauthStep::Error(text)) => {
-                emit(Message::Notice(text))
-            }
+            Ok(ReauthStep::Info(text)) | Ok(ReauthStep::Error(text)) => emit(Message::Notice(text)),
             Ok(ReauthStep::Allow) => {
                 emit(Message::AuthSucceeded);
                 return;

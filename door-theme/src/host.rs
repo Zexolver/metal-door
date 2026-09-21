@@ -373,7 +373,9 @@ mod asset_vetting_tests {
         // in production mode (no dev-config bypass) so the allowlist is enforced.
         unsafe { std::env::remove_var(crate::ENV_CONFIG) };
         let p = std::env::temp_dir().join(format!("door-vet-{}.png", std::process::id()));
-        image::RgbaImage::new(2, 2).save(&p).expect("write test png");
+        image::RgbaImage::new(2, 2)
+            .save(&p)
+            .expect("write test png");
         assert!(
             vet_asset(&p, "wallpaper").is_none(),
             "a valid image under /tmp must be refused by the trusted-roots allowlist"
