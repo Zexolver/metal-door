@@ -52,7 +52,10 @@ use smithay::{
             timer::{TimeoutAction, Timer},
             LoopHandle,
         },
-        drm::control::{connector, crtc, Device as ControlDevice, ModeTypeFlags},
+        drm::{
+            control::{connector, crtc, Device as ControlDevice, ModeTypeFlags},
+            Device as DrmDeviceTrait,
+        },
         input::{DeviceCapability, Libinput},
         rustix::fs::OFlags,
         wayland_protocols::wp::presentation_time::server::wp_presentation_feedback,
@@ -222,7 +225,24 @@ pub fn init() -> Result<UdevData, Box<dyn std::error::Error>> {
     })
 }
 
-/// Can this DRM node actually drive a display?
+/// What a probe of one DRM node found.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct DeviceProbe {
+    crtcs: usize,
+    connectors: usize,
+    /// Connectors reporting a display actually plugged in.
+    connected: usize,
+    driver: Option<String>,
+}
+
+impl DeviceProbe {
+    /// A node that can modeset at all. Render-only nodes have neither.
+    fn drives_a_display(&self) -> bool {
+        self.crtcs > 0 && self.connectors > 0
+    }
+}
+
+/// Probe one DRM node.
 ///
 /// On a PC the GPU and the display controller are the same device, so any node
 /// will do. On most ARM SoCs they are not: `panfrost`/`lima`/`v3d` render but
@@ -230,23 +250,66 @@ pub fn init() -> Result<UdevData, Box<dyn std::error::Error>> {
 /// owns the outputs — and which of them becomes `card0` is just probe order.
 /// Asking a render-only node for its connectors fails with `EOPNOTSUPP`, so
 /// picking by order lands on the wrong device roughly half the time.
-fn has_modesetting(session: &mut LibSeatSession, path: &Path) -> Result<bool, String> {
+///
+/// (Mesa's `kmsro` pairs a display-only node with the SoC's render node behind
+/// GBM/EGL, so choosing the KMS node here is right on split SoCs too — doorstep
+/// does not need its own multi-GPU path for them.)
+fn probe_device(session: &mut LibSeatSession, path: &Path) -> Result<DeviceProbe, String> {
     let fd = session
         .open(
             path,
             OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOCTTY | OFlags::NONBLOCK,
         )
         .map_err(|err| format!("{err}"))?;
-    let fd = DrmDeviceFd::new(DeviceFd::from(fd));
     // The fd closes when it drops at the end of this scope.
-    match ControlDevice::resource_handles(&fd) {
-        Ok(resources) => Ok(!resources.connectors().is_empty() && !resources.crtcs().is_empty()),
-        Err(err) => Err(format!("{err}")),
-    }
+    let fd = DrmDeviceFd::new(DeviceFd::from(fd));
+
+    let driver = DrmDeviceTrait::get_driver(&fd)
+        .ok()
+        .map(|info| info.name().to_string_lossy().into_owned());
+
+    let resources = ControlDevice::resource_handles(&fd).map_err(|err| format!("{err}"))?;
+
+    // `force_probe: false` — asking the kernel to re-probe every connector can
+    // take seconds per output, and a stale "disconnected" only costs this node
+    // its preference, never its eligibility.
+    let connected = resources
+        .connectors()
+        .iter()
+        .filter(|handle| {
+            ControlDevice::get_connector(&fd, **handle, false)
+                .map(|conn| conn.state() == connector::State::Connected)
+                .unwrap_or(false)
+        })
+        .count();
+
+    Ok(DeviceProbe {
+        crtcs: resources.crtcs().len(),
+        connectors: resources.connectors().len(),
+        connected,
+        driver,
+    })
 }
 
-/// Pick the DRM node doorstep will drive: the first one on this seat that can
-/// actually modeset. `DOORSTEP_DRM_DEVICE` overrides the search entirely.
+/// Choose among probed nodes: a node with something plugged in beats one with
+/// only unused outputs, and otherwise the earlier candidate wins.
+///
+/// The "connected" preference is not an ARM concern — it is what keeps a muxless
+/// amd64 laptop from picking the discrete GPU, whose connectors exist but have
+/// no panel behind them, over the integrated one that drives the screen.
+fn best_candidate(probes: &[(std::path::PathBuf, DeviceProbe)]) -> Option<usize> {
+    let usable: Vec<usize> = (0..probes.len())
+        .filter(|&i| probes[i].1.drives_a_display())
+        .collect();
+    usable
+        .iter()
+        .copied()
+        .find(|&i| probes[i].1.connected > 0)
+        .or_else(|| usable.first().copied())
+}
+
+/// Pick the DRM node doorstep will drive. `DOORSTEP_DRM_DEVICE` overrides the
+/// search entirely.
 fn select_drm_device(
     session: &mut LibSeatSession,
     seat: &str,
@@ -259,9 +322,9 @@ fn select_drm_device(
                 path.display()
             )
         })?;
-        match has_modesetting(session, &path) {
-            Ok(true) => {}
-            Ok(false) => tracing::warn!(
+        match probe_device(session, &path) {
+            Ok(probe) if probe.drives_a_display() => {}
+            Ok(_) => tracing::warn!(
                 "DOORSTEP_DRM_DEVICE={} reports no connectors or CRTCs; using it anyway",
                 path.display()
             ),
@@ -273,7 +336,9 @@ fn select_drm_device(
         return Ok((node, path));
     }
 
-    // Try the seat's primary GPU first, then everything else udev offers.
+    // The seat's primary GPU first — on amd64 that is the boot_vga device and
+    // almost always the right answer, so probing must not reorder it away.
+    // ARM has no boot_vga, so there the order is just udev's.
     let mut candidates: Vec<std::path::PathBuf> = Vec::new();
     if let Ok(Some(primary)) = primary_gpu(seat) {
         candidates.push(primary);
@@ -293,31 +358,62 @@ fn select_drm_device(
         .into());
     }
 
+    let mut probes = Vec::new();
     let mut rejected = Vec::new();
-    for path in &candidates {
-        let node = match DrmNode::from_path(path) {
-            Ok(node) => node,
-            Err(err) => {
-                rejected.push(format!("{}: not a DRM node ({err})", path.display()));
-                continue;
+    for path in candidates {
+        if DrmNode::from_path(&path).is_err() {
+            rejected.push(format!("{}: not a DRM node", path.display()));
+            continue;
+        }
+        match probe_device(session, &path) {
+            Ok(probe) => {
+                tracing::debug!(
+                    "probed {} (driver {}): {} crtcs, {} connectors, {} connected",
+                    path.display(),
+                    probe.driver.as_deref().unwrap_or("unknown"),
+                    probe.crtcs,
+                    probe.connectors,
+                    probe.connected
+                );
+                if !probe.drives_a_display() {
+                    rejected.push(format!(
+                        "{} (driver {}): render-only, no connectors or CRTCs",
+                        path.display(),
+                        probe.driver.as_deref().unwrap_or("unknown")
+                    ));
+                }
+                probes.push((path, probe));
             }
-        };
-        match has_modesetting(session, path) {
-            Ok(true) => return Ok((node, path.clone())),
-            Ok(false) => rejected.push(format!(
-                "{}: render-only, no connectors or CRTCs",
-                path.display()
-            )),
             Err(err) => rejected.push(format!("{}: {err}", path.display())),
         }
     }
 
-    Err(format!(
-        "none of this seat's DRM devices can drive a display:\n  - {}\n\
-         Set DOORSTEP_DRM_DEVICE=/dev/dri/cardN to force one.",
-        rejected.join("\n  - ")
-    )
-    .into())
+    match best_candidate(&probes) {
+        Some(index) => {
+            let (path, probe) = &probes[index];
+            let node = DrmNode::from_path(path)?;
+            if probe.connected == 0 {
+                tracing::warn!(
+                    "{} has no connected output; using it anyway as nothing else qualifies",
+                    path.display()
+                );
+            }
+            tracing::info!(
+                "using {} (driver {}, {} connected of {} connectors)",
+                path.display(),
+                probe.driver.as_deref().unwrap_or("unknown"),
+                probe.connected,
+                probe.connectors
+            );
+            Ok((node, path.clone()))
+        }
+        None => Err(format!(
+            "none of this seat's DRM devices can drive a display:\n  - {}\n\
+             Set DOORSTEP_DRM_DEVICE=/dev/dri/cardN to force one.",
+            rejected.join("\n  - ")
+        )
+        .into()),
+    }
 }
 
 /// Wire up input, session and udev events, open the GPU, and light the outputs.
@@ -952,5 +1048,87 @@ impl Drop for UdevData {
     fn drop(&mut self) {
         self.device = None;
         self.renderer = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{best_candidate, DeviceProbe};
+    use std::path::PathBuf;
+
+    fn probe(crtcs: usize, connectors: usize, connected: usize, driver: &str) -> DeviceProbe {
+        DeviceProbe {
+            crtcs,
+            connectors,
+            connected,
+            driver: Some(driver.to_string()),
+        }
+    }
+
+    fn candidates(entries: &[(&str, DeviceProbe)]) -> Vec<(PathBuf, DeviceProbe)> {
+        entries
+            .iter()
+            .map(|(path, probe)| (PathBuf::from(path), probe.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn arm_soc_skips_the_render_only_node() {
+        // The failure this selection exists for: panfrost probes first and owns
+        // card0, but every output hangs off the display controller on card1.
+        let probes = candidates(&[
+            ("/dev/dri/card0", probe(0, 0, 0, "panfrost")),
+            ("/dev/dri/card1", probe(2, 3, 1, "rockchip-drm")),
+        ]);
+        let picked = best_candidate(&probes).expect("a KMS node is available");
+        assert_eq!(probes[picked].0, PathBuf::from("/dev/dri/card1"));
+    }
+
+    #[test]
+    fn amd64_keeps_the_primary_gpu_first() {
+        // A single-GPU PC must land on the node udev named first, exactly as it
+        // did before any of this probing existed.
+        let probes = candidates(&[("/dev/dri/card0", probe(4, 5, 2, "amdgpu"))]);
+        assert_eq!(best_candidate(&probes), Some(0));
+    }
+
+    #[test]
+    fn a_plugged_in_output_beats_an_idle_one() {
+        // Muxless laptop: the discrete GPU has connectors but no panel behind
+        // them, and picking it would light nothing.
+        let probes = candidates(&[
+            ("/dev/dri/card0", probe(4, 4, 0, "nvidia-drm")),
+            ("/dev/dri/card1", probe(3, 4, 1, "i915")),
+        ]);
+        let picked = best_candidate(&probes).expect("a connected node is available");
+        assert_eq!(probes[picked].0, PathBuf::from("/dev/dri/card1"));
+    }
+
+    #[test]
+    fn a_kms_node_with_nothing_plugged_in_is_still_better_than_none() {
+        // Headless or a display asleep at startup: still the only thing that can
+        // modeset, so use it rather than refusing to start.
+        let probes = candidates(&[
+            ("/dev/dri/card0", probe(0, 0, 0, "v3d")),
+            ("/dev/dri/card1", probe(2, 2, 0, "vc4")),
+        ]);
+        let picked = best_candidate(&probes).expect("a KMS node is available");
+        assert_eq!(probes[picked].0, PathBuf::from("/dev/dri/card1"));
+    }
+
+    #[test]
+    fn render_only_everywhere_selects_nothing() {
+        let probes = candidates(&[
+            ("/dev/dri/card0", probe(0, 0, 0, "panfrost")),
+            ("/dev/dri/card1", probe(0, 0, 0, "lima")),
+        ]);
+        assert_eq!(best_candidate(&probes), None);
+    }
+
+    #[test]
+    fn crtcs_without_connectors_does_not_count_as_modesetting() {
+        assert!(!probe(2, 0, 0, "odd").drives_a_display());
+        assert!(!probe(0, 2, 0, "odd").drives_a_display());
+        assert!(probe(1, 1, 0, "ok").drives_a_display());
     }
 }
