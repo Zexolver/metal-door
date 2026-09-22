@@ -52,7 +52,7 @@ use smithay::{
             timer::{TimeoutAction, Timer},
             LoopHandle,
         },
-        drm::control::{connector, crtc, ModeTypeFlags},
+        drm::control::{connector, crtc, Device as ControlDevice, ModeTypeFlags},
         input::{DeviceCapability, Libinput},
         rustix::fs::OFlags,
         wayland_protocols::wp::presentation_time::server::wp_presentation_feedback,
@@ -108,7 +108,11 @@ pub struct UdevData {
     /// event loop until the compositor state they dispatch against exists.
     notifier: Option<LibSeatSessionNotifier>,
     libinput: Libinput,
+    /// Kept for diagnostics; `device_path` is what actually gets opened.
+    #[allow(dead_code)]
     primary_gpu: DrmNode,
+    /// The card node [`select_drm_device`] settled on.
+    device_path: std::path::PathBuf,
     renderer: Option<GlesRenderer>,
     device: Option<(DrmNode, DeviceData)>,
     pointer_buffer: MemoryRenderBuffer,
@@ -196,18 +200,8 @@ pub fn init() -> Result<UdevData, Box<dyn std::error::Error>> {
         )
     })?;
     let seat = session.seat();
-    let gpu = primary_gpu(&seat)?
-        .and_then(|path| DrmNode::from_path(path).ok())
-        .or_else(|| {
-            all_gpus(&seat)
-                .ok()?
-                .into_iter()
-                .find_map(|path| DrmNode::from_path(path).ok())
-        })
-        .ok_or_else(|| {
-            format!("no GPU on seat `{seat}` — nothing in /dev/dri that logind will lease out")
-        })?;
-    tracing::info!("primary GPU: {gpu}");
+    let (gpu, device_path) = select_drm_device(&mut session.clone(), &seat)?;
+    tracing::info!("primary GPU: {gpu} ({})", device_path.display());
 
     let mut libinput =
         Libinput::new_with_udev::<LibinputSessionInterface<LibSeatSession>>(session.clone().into());
@@ -220,11 +214,110 @@ pub fn init() -> Result<UdevData, Box<dyn std::error::Error>> {
         notifier: Some(notifier),
         libinput,
         primary_gpu: gpu,
+        device_path,
         renderer: None,
         device: None,
         pointer_buffer: cursor::default_pointer(),
         keyboards: Vec::new(),
     })
+}
+
+/// Can this DRM node actually drive a display?
+///
+/// On a PC the GPU and the display controller are the same device, so any node
+/// will do. On most ARM SoCs they are not: `panfrost`/`lima`/`v3d` render but
+/// have no modesetting at all, while a separate `rockchip-drm`/`sun4i-drm`/`vc4`
+/// owns the outputs — and which of them becomes `card0` is just probe order.
+/// Asking a render-only node for its connectors fails with `EOPNOTSUPP`, so
+/// picking by order lands on the wrong device roughly half the time.
+fn has_modesetting(session: &mut LibSeatSession, path: &Path) -> Result<bool, String> {
+    let fd = session
+        .open(
+            path,
+            OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOCTTY | OFlags::NONBLOCK,
+        )
+        .map_err(|err| format!("{err}"))?;
+    let fd = DrmDeviceFd::new(DeviceFd::from(fd));
+    // The fd closes when it drops at the end of this scope.
+    match ControlDevice::resource_handles(&fd) {
+        Ok(resources) => Ok(!resources.connectors().is_empty() && !resources.crtcs().is_empty()),
+        Err(err) => Err(format!("{err}")),
+    }
+}
+
+/// Pick the DRM node doorstep will drive: the first one on this seat that can
+/// actually modeset. `DOORSTEP_DRM_DEVICE` overrides the search entirely.
+fn select_drm_device(
+    session: &mut LibSeatSession,
+    seat: &str,
+) -> Result<(DrmNode, std::path::PathBuf), Box<dyn std::error::Error>> {
+    if let Some(forced) = std::env::var_os("DOORSTEP_DRM_DEVICE") {
+        let path = std::path::PathBuf::from(forced);
+        let node = DrmNode::from_path(&path).map_err(|err| {
+            format!(
+                "DOORSTEP_DRM_DEVICE={} is not a DRM node: {err}",
+                path.display()
+            )
+        })?;
+        match has_modesetting(session, &path) {
+            Ok(true) => {}
+            Ok(false) => tracing::warn!(
+                "DOORSTEP_DRM_DEVICE={} reports no connectors or CRTCs; using it anyway",
+                path.display()
+            ),
+            Err(err) => tracing::warn!(
+                "could not probe DOORSTEP_DRM_DEVICE={}: {err}; using it anyway",
+                path.display()
+            ),
+        }
+        return Ok((node, path));
+    }
+
+    // Try the seat's primary GPU first, then everything else udev offers.
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(Some(primary)) = primary_gpu(seat) {
+        candidates.push(primary);
+    }
+    if let Ok(all) = all_gpus(seat) {
+        for path in all {
+            if !candidates.contains(&path) {
+                candidates.push(path);
+            }
+        }
+    }
+
+    if candidates.is_empty() {
+        return Err(format!(
+            "no GPU on seat `{seat}` — nothing in /dev/dri that logind will lease out"
+        )
+        .into());
+    }
+
+    let mut rejected = Vec::new();
+    for path in &candidates {
+        let node = match DrmNode::from_path(path) {
+            Ok(node) => node,
+            Err(err) => {
+                rejected.push(format!("{}: not a DRM node ({err})", path.display()));
+                continue;
+            }
+        };
+        match has_modesetting(session, path) {
+            Ok(true) => return Ok((node, path.clone())),
+            Ok(false) => rejected.push(format!(
+                "{}: render-only, no connectors or CRTCs",
+                path.display()
+            )),
+            Err(err) => rejected.push(format!("{}: {err}", path.display())),
+        }
+    }
+
+    Err(format!(
+        "none of this seat's DRM devices can drive a display:\n  - {}\n\
+         Set DOORSTEP_DRM_DEVICE=/dev/dri/cardN to force one.",
+        rejected.join("\n  - ")
+    )
+    .into())
 }
 
 /// Wire up input, session and udev events, open the GPU, and light the outputs.
@@ -236,8 +329,8 @@ pub fn start(
         return Err("udev::start called on a non-udev backend".into());
     };
     let seat = data.session.seat();
-    let primary = data.primary_gpu;
     let libinput_context = data.libinput.clone();
+    let device_path = data.device_path.clone();
     let notifier = data
         .notifier
         .take()
@@ -300,23 +393,6 @@ pub fn start(
     )?;
 
     let udev_backend = UdevBackend::new(&seat)?;
-    let device_path = udev_backend
-        .device_list()
-        .find(|(device_id, _)| {
-            DrmNode::from_dev_id(*device_id)
-                .map(|node| node.dev_id() == primary.dev_id() || same_card(node, primary))
-                .unwrap_or(false)
-        })
-        .map(|(_, path)| path.to_path_buf())
-        .or_else(|| {
-            // Fall back to the first card udev knows about: a machine with one
-            // GPU whose render node we picked above still needs its card node.
-            udev_backend
-                .device_list()
-                .next()
-                .map(|(_, path)| path.to_path_buf())
-        })
-        .ok_or("no DRM device to open")?;
 
     state.add_device(&device_path, loop_handle)?;
 
@@ -337,17 +413,6 @@ pub fn start(
     )?;
 
     Ok(())
-}
-
-/// Two nodes belonging to the same physical card (primary vs. render node).
-fn same_card(a: DrmNode, b: DrmNode) -> bool {
-    match (
-        a.node_with_type(NodeType::Primary),
-        b.node_with_type(NodeType::Primary),
-    ) {
-        (Some(Ok(a)), Some(Ok(b))) => a.dev_id() == b.dev_id(),
-        _ => false,
-    }
 }
 
 impl Doorstep {
