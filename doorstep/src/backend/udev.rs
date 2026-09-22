@@ -67,10 +67,22 @@ use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 
 use crate::{backend::BackendData, cursor, render, state::Doorstep};
 
-/// Widely supported, and in this order: 10-bit first, then 8-bit.
+/// Scanout formats to try, in order: 10-bit first, then 8-bit, and within each
+/// the opaque `X` variant before the alpha `A` one.
+///
+/// The compositor's own framebuffer is opaque — nothing is behind it to blend
+/// with — so an alpha channel on the primary plane buys nothing, and plenty of
+/// display controllers (common on ARM SoCs, where the display block is much
+/// simpler than a desktop GPU's) support only the `X` formats for scanout.
+/// Offering alpha-only formats there means no format matches and modesetting
+/// fails with `EINVAL`.
 const COLOR_FORMATS: &[Fourcc] = &[
+    Fourcc::Xbgr2101010,
+    Fourcc::Xrgb2101010,
     Fourcc::Abgr2101010,
     Fourcc::Argb2101010,
+    Fourcc::Xbgr8888,
+    Fourcc::Xrgb8888,
     Fourcc::Abgr8888,
     Fourcc::Argb8888,
 ];
@@ -552,6 +564,26 @@ impl Doorstep {
             }
         })?;
 
+        // Some controllers advertise 10-bit and then fail the modeset; this is
+        // the same escape hatch anvil exposes as ANVIL_DISABLE_10BIT.
+        let color_formats: Vec<Fourcc> = if std::env::var_os("DOORSTEP_DISABLE_10BIT").is_some() {
+            COLOR_FORMATS
+                .iter()
+                .copied()
+                .filter(|f| {
+                    !matches!(
+                        f,
+                        Fourcc::Xbgr2101010
+                            | Fourcc::Xrgb2101010
+                            | Fourcc::Abgr2101010
+                            | Fourcc::Argb2101010
+                    )
+                })
+                .collect()
+        } else {
+            COLOR_FORMATS.to_vec()
+        };
+
         let drm_output_manager = DrmOutputManager::new(
             drm,
             GbmAllocator::new(
@@ -563,7 +595,7 @@ impl Doorstep {
                 node.node_with_type(NodeType::Render).and_then(|n| n.ok()),
             ),
             Some(gbm),
-            COLOR_FORMATS.iter().copied(),
+            color_formats.iter().copied(),
             render_formats,
         );
 
@@ -713,7 +745,19 @@ impl Doorstep {
                 ) {
                 Ok(drm_output) => drm_output,
                 Err(err) => {
-                    tracing::warn!("failed to bring up {name}: {err}");
+                    let (w, h) = drm_mode.size();
+                    tracing::warn!(
+                        "failed to bring up {name} at {w}x{h}@{}mHz: {err} \
+                         (scanout formats tried: {}). If this is EINVAL the \
+                         display controller may accept none of them — set \
+                         DOORSTEP_DISABLE_10BIT=1 to try 8-bit only.",
+                        drm_mode.vrefresh(),
+                        COLOR_FORMATS
+                            .iter()
+                            .map(|f| format!("{f:?}"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
                     return;
                 }
             }
